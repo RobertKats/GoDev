@@ -9,15 +9,25 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 )
 
-var playerImg *ebiten.Image
+var (
+	playerImg *ebiten.Image
+	skelly    *ebiten.Image
+)
 
 func init() {
-	fmt.Println("Loading player data")
+	// TODO: Make a list of sprites and maybe expected types
+	fmt.Println("Loading entity data")
 	pi, _, err := ebitenutil.NewImageFromFile("assets/NinjaSpriteSheet.png")
-	playerImg = pi // Why do I need to redeclare the var
 	if err != nil {
 		log.Fatal(err)
 	}
+	playerImg = pi // Why do I need to redeclare the var
+
+	sp, _, err := ebitenutil.NewImageFromFile("assets/SkeletonSpriteSheet.png")
+	if err != nil {
+		log.Fatal(err)
+	}
+	skelly = sp
 }
 
 type Sprite struct {
@@ -26,15 +36,37 @@ type Sprite struct {
 	Dx, Dy float32 // change in x and y, ie velocity, Do i need this if I have target
 }
 
+func NewSprite() *Sprite {
+	return &Sprite{
+		Img: skelly,
+		X:   50, Y: 50,
+		Dx: 0, Dy: 50,
+	}
+}
+
 type PlayerState uint8
+type PlayerDirection uint8
+
+const (
+	Down PlayerDirection = iota
+	Up
+	Left
+	Right
+)
 
 const (
 	// This also feels bad
 	// Better if in player go file / package
-	Down PlayerState = iota
-	Up
-	Left
-	Right
+	DownStand PlayerState = iota
+	UpStand
+	LeftStand
+	RightStand
+
+	DownWalk
+	UpWalk
+	LeftWalk
+	RightWalk
+
 	DownJump
 	UpJump
 	LeftJump
@@ -45,8 +77,10 @@ type Player struct {
 	*Sprite
 	Frame            int
 	TargetX, TargetY float32
+	PlayerDirection  PlayerDirection
 	PlayerFace       PlayerState
 	Animations       map[PlayerState]*Animation
+	JumpTPS          uint
 	// store the last state? pushdown automata
 	// This way I can get the rest frame
 }
@@ -63,14 +97,21 @@ func NewPlayer() *Player {
 
 		// Is there a better approch to handling all the animations that exist?
 		Animations: map[PlayerState]*Animation{
-			Down:      NewAnimation(4, 12, 4, 20.0),
-			Up:        NewAnimation(5, 13, 4, 20.0),
-			Left:      NewAnimation(6, 14, 4, 20.0),
-			Right:     NewAnimation(7, 15, 4, 20.0),
+			// The player is always animating
+			DownStand:  NewAnimation(0, 0, 0, 0.0),
+			UpStand:    NewAnimation(1, 0, 0, 0.0),
+			LeftStand:  NewAnimation(2, 0, 0, 0.0),
+			RightStand: NewAnimation(3, 0, 0, 0.0),
+
+			DownWalk:  NewAnimation(4, 12, 4, 20.0),
+			UpWalk:    NewAnimation(5, 13, 4, 20.0),
+			LeftWalk:  NewAnimation(6, 14, 4, 20.0),
+			RightWalk: NewAnimation(7, 15, 4, 20.0),
+
 			DownJump:  NewAnimation(20, 20, 0, 0.0),
 			UpJump:    NewAnimation(21, 21, 0, 0.0),
-			LeftJump:  NewAnimation(22, 21, 0, 0.0),
-			RightJump: NewAnimation(23, 21, 0, 0.0),
+			LeftJump:  NewAnimation(22, 22, 0, 0.0),
+			RightJump: NewAnimation(23, 23, 0, 0.0),
 		},
 	}
 }
@@ -79,53 +120,60 @@ func (p *Player) IsWalking() bool {
 	return (p.X != p.TargetX || p.Y != p.TargetY)
 }
 
-// Bad idea to pass jumped, maybe create an input object or just check it here?
-func (p *Player) AnimationState(dx, dy float64, jumped bool) *Animation {
-	// dy and dx -> The diffrance between the target and the current position
+func (p *Player) AnimationState(dx, dy float64) *Animation {
+	// dy and dx -> The difference between the target and the current position
 
-	// player is standing still
 	if dx == 0 && dy == 0 {
-		if jumped {
-			switch p.PlayerFace {
-			case Up:
-				return p.Animations[UpJump]
-			case Down:
-				return p.Animations[DownJump]
-			case Left:
-				return p.Animations[LeftJump]
-			case Right:
-				return p.Animations[RightJump]
-
-			}
+		switch p.PlayerDirection {
+		case Up:
+			p.PlayerFace = UpStand
+		case Down:
+			p.PlayerFace = DownStand
+		case Left:
+			p.PlayerFace = LeftStand
+		case Right:
+			p.PlayerFace = RightStand
 		}
-	}
-
-	//check the longest leg of the path to make player face they way when walking by mouse click
-	// Is there better code then this nasty if checker
-	if math.Abs(dx) > math.Abs(dy) {
+		// check the longest leg to set PlayerDirection, requried for mouse clicks
+		// Is there better code then this nasty if checker
+	} else if math.Abs(dx) > math.Abs(dy) {
 		if dx > 0 {
-			if jumped {
-				p.PlayerFace = RightJump
-			} else {
-				p.PlayerFace = Right
-			}
-			return p.Animations[p.PlayerFace]
+			p.PlayerDirection = Right
+			p.PlayerFace = RightWalk
 		}
 		if dx < 0 {
-			p.PlayerFace = Left
-			return p.Animations[Left]
+			p.PlayerDirection = Left
+			p.PlayerFace = LeftWalk
+		}
+	} else {
+		if dy > 0 {
+			p.PlayerDirection = Down
+			p.PlayerFace = DownWalk
+		}
+		if dy < 0 {
+			p.PlayerDirection = Up
+			p.PlayerFace = UpWalk
 		}
 	}
-	if dy > 0 {
-		p.PlayerFace = Down
-		return p.Animations[Down]
-	}
-	if dy < 0 {
-		p.PlayerFace = Up
-		return p.Animations[Up]
+	// Player can jump at any point for now
+	if p.JumpTPS > 20 {
+		switch p.PlayerDirection {
+		case Up:
+			p.PlayerFace = UpJump
+		case Down:
+			p.PlayerFace = DownJump
+		case Left:
+			p.PlayerFace = LeftJump
+		case Right:
+			p.PlayerFace = RightJump
+		}
 	}
 
-	return nil // why return nil? Why not always return an animations?
+	if p.JumpTPS > 0 {
+		p.JumpTPS -= 1
+	}
+
+	return p.Animations[p.PlayerFace] // why return nil? Why not always return an animations?
 }
 
 type Animation struct {
