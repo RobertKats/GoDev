@@ -16,4 +16,7 @@ func (c *Camera) FollowTarget(targetX, targetY, screenWidth, screenHeight float6
 	// the camera is just an offset for the player.
 	c.X = (screenWidth / 2.0) - targetX
 	c.Y = (screenHeight / 2.0) - targetY
+
+	c.Y = 0
+	c.X = 0
 }

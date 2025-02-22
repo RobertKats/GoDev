@@ -4,94 +4,52 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"math"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
-	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	"github.com/hajimehoshi/ebiten/v2/vector"
 )
 
 type Game struct {
 	Player *Player
 	Mob    *Sprite
+	Box    *Sprite
 	Cam    *Camera
 }
 
 func NewGame() *Game {
 
+	// v := image.Rect(100, 100, 200, 200).(*ebiten.Image)
+	img := ebiten.NewImage(50, 30)
+	fmt.Printf("%+v", img)
+	vector.StrokeRect(
+		img,
+		float32(img.Bounds().Min.X), float32(img.Bounds().Min.Y),
+		float32(img.Bounds().Dx()), float32(img.Bounds().Dy()),
+		1.0,
+		color.RGBA{255, 0, 0, 255},
+		true)
+
 	return &Game{
 		Player: NewPlayer(),
-		Mob:    NewSprite(),
-		Cam:    NewCamera(0, 0),
+		Mob:    NewSprite(skelly),
+		Box: &Sprite{
+			Img:    img,
+			Width:  50,
+			Height: 30,
+			X:      320 / 2, Y: 240 / 2,
+			Dx: 0, Dy: 0,
+			TargetX: 320 / 2, TargetY: 240 / 2,
+			speed: 2.0,
+		},
+		Cam: NewCamera(0, 0),
 	}
 }
 
 func (g *Game) Update() error {
 
-	// reset player velocity, if player had any.
-	g.Player.Dx = 0 // both are unused remove?
-	g.Player.Dy = 0
-
-	// each tick we need to figure out the next frame we want to show the user.
-	g.Player.Frame = 0
-
-	if ebiten.IsKeyPressed(ebiten.KeyLeft) {
-		g.Player.TargetX -= 2
-	}
-	if ebiten.IsKeyPressed(ebiten.KeyRight) {
-		g.Player.TargetX += 2
-	}
-	if ebiten.IsKeyPressed(ebiten.KeyUp) {
-		g.Player.TargetY -= 2
-	}
-	if ebiten.IsKeyPressed(ebiten.KeyDown) {
-		g.Player.TargetY += 2
-	}
-	if ebiten.IsKeyPressed(ebiten.KeySpace) {
-
-		// Ha this kinda works.
-		// Somehow move into player?
-		if g.Player.JumpTPS == 0 {
-			// 20 seconds is how long is
-			// 20 seconds for the cooldown
-			g.Player.JumpTPS = 40
-		}
-	}
-
-	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-		// Fires once per click
-		x, y := ebiten.CursorPosition()
-		fmt.Printf("x%d y%d\n", x, y)
-		x -= int(g.Cam.X) + 8 // half of tile size
-		y -= int(g.Cam.Y) + 8
-		g.Player.TargetX = float32(x)
-		g.Player.TargetY = float32(y)
-	}
-
-	// Compute the vector from the player's current position to the target.
-	// dx and dy are not velocities, they are distance, rename?
-	dx := float64(g.Player.TargetX - g.Player.X)
-	dy := float64(g.Player.TargetY - g.Player.Y)
-
-	a := g.Player.AnimationState(dx, dy)
-	// We should always an AnimationState the player is in
-	a.Update()
-	g.Player.Frame = a.frame
-
-	// Calculate the distance to the target.
-	dist := math.Hypot(dx, dy)
-
-	// If the player is close enough to the target, snap to it.
-	speed := 2.5 //todo: move into sprite or player object
-	if dist < speed {
-		g.Player.X = g.Player.TargetX
-		g.Player.Y = g.Player.TargetY
-	} else {
-		// Normalize the vector and move the player by speed
-		g.Player.X += float32((dx / dist) * speed)
-		g.Player.Y += float32((dy / dist) * speed)
-	}
-
+	g.Player.Update(g)
+	// update cam
 	g.Cam.FollowTarget(float64(g.Player.X)+8, float64(g.Player.Y)+8, 320, 240)
 
 	return nil
@@ -137,11 +95,24 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		&opts,
 	)
 
+	opts.GeoM.Reset()
+
+	opts.GeoM.Translate(float64(g.Box.X), float64(g.Box.Y))
+	opts.GeoM.Translate(g.Cam.X, g.Cam.Y)
+
+	// g.Box.Img.ColorModel().Convert(color.RGBA{255, 0, 0, 255})
+	screen.DrawImage(
+		g.Box.Img,
+		&opts,
+	)
+
 	x, y := ebiten.CursorPosition()
 
 	msg := fmt.Sprintf("fps :%0.2f\n", ebiten.ActualFPS())
 	msg += fmt.Sprintf("mouse x y: %d %d\n", x, y)
 	msg += fmt.Sprintf("player x y:  %f %f\n", g.Player.X, g.Player.Y)
+	msg += fmt.Sprintf("target x y:  %f %f\n", g.Player.TargetX, g.Player.TargetY)
+	msg += fmt.Sprintf("speed x y:  %f %f\n", g.Player.Dx, g.Player.Dy)
 	msg += fmt.Sprintf("player frame: %d\n", g.Player.Frame)
 	ebitenutil.DebugPrint(screen, msg)
 	// ebitenutil.DebugPrint(screen, fmt.Sprintf("\nTPS: %0.2f", ebiten.ActualTPS()))
